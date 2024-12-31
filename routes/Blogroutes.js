@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { createBlog, getBlogsByFolder } = require('../controllers/blogController');
-const { protect } = require('../middleware/authMiddleware');  // Assuming you have token verification middleware
+const { protect } = require('../middleware/AuthMiddleware');  // Assuming you have token verification middleware
 
 // Route to create a new blog post in a specific folder
 router.post('/folders/:folderId/blog', protect, createBlog);

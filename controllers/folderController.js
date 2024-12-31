@@ -1,6 +1,6 @@
 // controllers/folderController.js
-const Folder = require('../models/folderModel');
-const User = require('../models/user');
+const Folder = require('../models/FolderModel');
+const User = require('../models/User');
 const { formatISO } = require('date-fns');
 
 // Create new folder

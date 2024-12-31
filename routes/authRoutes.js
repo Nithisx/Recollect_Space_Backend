@@ -1,6 +1,6 @@
 // routes/authRoutes.js
 const express = require('express');
-const { loginUser, sendOTP, verifyOTP, forgotPassword, resetPassword } = require('../controllers/authControllers');
+const { loginUser, sendOTP, verifyOTP, forgotPassword, resetPassword } = require('../controllers/AuthControllers');
 
 const router = express.Router();
 

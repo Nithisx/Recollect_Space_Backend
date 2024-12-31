@@ -1,9 +1,9 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
-const connectDB = require('./config/db'); 
-const authRoutes = require('./routes/authRoutes'); 
-const folderRoutes = require('./routes/folderRoutes');
+const connectDB = require('./config/Db'); 
+const authRoutes = require('./routes/AuthRoutes'); 
+const folderRoutes = require('./routes/FolderRoutes');
 const path = require('path');
 const blogRoutes =require("./routes/Blogroutes")
 

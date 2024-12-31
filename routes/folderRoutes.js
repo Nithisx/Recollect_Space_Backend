@@ -1,10 +1,10 @@
 // routes/folderRoutes.js
 const express = require('express');
 const router = express.Router();
-const Folder = require('../models/folderModel');
-const User = require('../models/user');
-const folderController = require('../controllers/folderController');
-const { protect } = require('../middleware/authMiddleware');
+const Folder = require('../models/FolderModel');
+const User = require('../models/User');
+const folderController = require('../controllers/FolderController');
+const { protect } = require('../middleware/AuthMiddleware');
 const multer = require('multer');
 const mongoose = require('mongoose');
 

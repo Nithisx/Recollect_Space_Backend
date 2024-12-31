@@ -1,8 +1,8 @@
 const crypto = require('crypto');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
-const transporter = require('../config/nodemailerConfig');
-const passwordUtils = require('../utils/password-utils');
+const transporter = require('../config/NodemailerConfig');
+const passwordUtils = require('../utils/Password-utils');
 
 const generateToken = (id) => {
     return jwt.sign({ id }, process.env.JWT_SECRET, {
