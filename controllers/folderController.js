@@ -2,6 +2,7 @@
 const Folder = require('../models/FolderModel');
 const User = require('../models/User');
 const { formatISO } = require('date-fns');
+const mongoose = require('mongoose');
 
 // Create new folder
 const createFolder = async (req, res) => {
@@ -31,6 +32,7 @@ const createFolder = async (req, res) => {
 const getFoldersByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
+
     const folders = await Folder.find({ userId });
     res.status(200).json({ folders });
   } catch (error) {
@@ -70,9 +72,14 @@ const uploadPhoto = async (req, res) => {
 };
 
 // Get folder by ID
-const getFolderById = async (req, res) => {
+const  getFolderById = async (req, res) => {
   try {
     const { folderId } = req.params;
+    console.log('Received folderId:', folderId);
+
+    if (!mongoose.Types.ObjectId.isValid(folderId)) {
+      return res.status(400).json({ message: 'Invalid folderId format' });
+  }
     const folder = await Folder.findById(folderId);
 
     if (!folder) {

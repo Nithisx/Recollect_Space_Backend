@@ -11,16 +11,13 @@ const mongoose = require('mongoose');
 // Multer config
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },  // 50MB limit for file size
+  // No file filter to reject any type of image
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('File type not allowed'), false);
-    }
-  },
+    cb(null, true);  // Accept all files without filtering
+  }
 });
+
 
 // ----------------------------
 // SHARE FOLDER ENDPOINT
