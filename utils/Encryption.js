@@ -13,30 +13,30 @@ require('dotenv').config();
  * @param {string} masterKey - The master key for encryption.
  * @returns {Buffer} A single buffer containing salt, IV, tag, and ciphertext.
  */
-async function serverEncrypt(buffer, masterKey) {
-  try {
-    // Generate random salt (64 bytes) and IV (16 bytes)
-    const salt = crypto.randomBytes(64);
-    const iv = crypto.randomBytes(16);
+function serverEncrypt(buffer, masterKey) {
+    try {
+        // Generate random salt (64 bytes) and IV (16 bytes)
+        const salt = crypto.randomBytes(64);
+        const iv = crypto.randomBytes(16);
 
-    // Derive a 256-bit key using PBKDF2 with 100,000 iterations of SHA-512
-    const key = crypto.pbkdf2Sync(masterKey, salt, 100000, 32, 'sha512');
+        // Derive a 256-bit key using PBKDF2 with 100,000 iterations of SHA-512
+        const key = crypto.pbkdf2Sync(masterKey, salt, 100000, 32, 'sha512');
 
-    // Create cipher with AES-256-GCM
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+        // Create cipher with AES-256-GCM
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
 
-    // Encrypt
-    const ciphertext = Buffer.concat([cipher.update(buffer), cipher.final()]);
+        // Encrypt
+        const ciphertext = Buffer.concat([cipher.update(buffer), cipher.final()]);
 
-    // Authentication tag
-    const tag = cipher.getAuthTag();
+        // Authentication tag
+        const tag = cipher.getAuthTag();
 
-    // Concatenate all pieces: salt + iv + tag + ciphertext
-    return Buffer.concat([salt, iv, tag, ciphertext]);
-  } catch (error) {
-    console.error('Encryption error:', error);
-    throw new Error('Encryption failed.');
-  }
+        // Concatenate all pieces: salt + iv + tag + ciphertext
+        return Buffer.concat([salt, iv, tag, ciphertext]);
+    } catch (error) {
+        console.error('Encryption error:', error);
+        throw new Error('Encryption failed.');
+    }
 }
 
 /**
@@ -49,35 +49,35 @@ async function serverEncrypt(buffer, masterKey) {
  * @param {string} masterKey - The master key used during encryption.
  * @returns {Buffer} The decrypted data.
  */
-async function serverDecrypt(encryptedBuffer, masterKey) {
-  try {
-    // Extract components
-    const salt = encryptedBuffer.slice(0, 64);
-    const iv = encryptedBuffer.slice(64, 80);
-    const tag = encryptedBuffer.slice(80, 96);
-    const ciphertext = encryptedBuffer.slice(96);
+function serverDecrypt(encryptedBuffer, masterKey) {
+    try {
+        // Extract components
+        const salt = encryptedBuffer.slice(0, 64);
+        const iv = encryptedBuffer.slice(64, 80);
+        const tag = encryptedBuffer.slice(80, 96);
+        const ciphertext = encryptedBuffer.slice(96);
 
-    // Derive the same 256-bit key used during encryption
-    const key = crypto.pbkdf2Sync(masterKey, salt, 100000, 32, 'sha512');
+        // Derive the same 256-bit key used during encryption
+        const key = crypto.pbkdf2Sync(masterKey, salt, 100000, 32, 'sha512');
 
-    // Create decipher
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
+        // Create decipher
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(tag);
 
-    // Decrypt
-    const decrypted = Buffer.concat([
-      decipher.update(ciphertext),
-      decipher.final(),
-    ]);
+        // Decrypt
+        const decrypted = Buffer.concat([
+            decipher.update(ciphertext),
+            decipher.final(),
+        ]);
 
-    return decrypted;
-  } catch (error) {
-    console.error('Decryption error:', error);
-    throw new Error('Decryption failed.');
-  }
+        return decrypted;
+    } catch (error) {
+        console.error('Decryption error:', error);
+        throw new Error('Decryption failed.');
+    }
 }
 
 module.exports = {
-  serverEncrypt,
-  serverDecrypt,
+    serverEncrypt,
+    serverDecrypt,
 };
