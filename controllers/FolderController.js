@@ -3,6 +3,8 @@ const Folder = require('../models/FolderModel');
 const User = require('../models/User');
 const { formatISO } = require('date-fns');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
+const { generateEncryptionKey, serverEncrypt, serverDecrypt } = require('../utils/Encryption');
 
 // Create new folder
 const createFolder = async (req, res) => {
@@ -41,64 +43,69 @@ const getFoldersByUserId = async (req, res) => {
   }
 };
 
-// Upload photos
+// Upload photos with encryption
 const uploadPhoto = async (req, res) => {
   const { folderId } = req.params;
   try {
     const folder = await Folder.findById(folderId);
-    if (!folder) {
-      return res.status(404).json({ message: 'Folder not found' });
-    }
-
+    if (!folder) return res.status(404).json({ message: 'Folder not found' });
+    
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'No files uploaded' });
     }
 
-    req.files.forEach((file) => {
+    const masterKey = process.env.ENCRYPTION_MASTER_KEY;
+    if (!masterKey) throw new Error('Encryption key not configured');
+
+    // Process each file with encryption
+    for (const file of req.files) {
+      const encryptedBuffer = await serverEncrypt(file.buffer, masterKey);
+      
       folder.photos.push({
         name: file.originalname,
-        data: file.buffer,
+        data: encryptedBuffer,
         contentType: file.mimetype,
         uploadedAt: formatISO(new Date()),
+        isEncrypted: true
       });
-    });
+    }
 
     await folder.save();
-    res.status(200).json({ folder });
+    res.status(200).json({ message: 'Files uploaded and encrypted successfully' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Error uploading photos', error });
+    res.status(500).json({ message: 'Error uploading photos', error: error.message });
   }
 };
 
-// Get folder by ID
-const  getFolderById = async (req, res) => {
+// Get folder by ID with decryption
+const getFolderById = async (req, res) => {
   try {
     const { folderId } = req.params;
-    console.log('Received folderId:', folderId);
-
-    if (!mongoose.Types.ObjectId.isValid(folderId)) {
-      return res.status(400).json({ message: 'Invalid folderId format' });
-  }
     const folder = await Folder.findById(folderId);
+    if (!folder) return res.status(404).json({ message: 'Folder not found' });
 
-    if (!folder) {
-      return res.status(404).json({ message: 'Folder not found' });
-    }
+    const masterKey = process.env.ENCRYPTION_MASTER_KEY;
+    if (!masterKey) throw new Error('Encryption key not configured');
 
-    // Convert photo Buffers to base64 for the front-end
-    const photos = folder.photos.map((photo) => ({
-      _id: photo._id,
-      name: photo.name,
-      updatedAt: photo.uploadedAt,
-      data: photo.data.toString('base64'),
-      contentType: photo.contentType,
+    // Decrypt photos
+    const photos = await Promise.all(folder.photos.map(async (photo) => {
+      if (!photo.isEncrypted) return photo;
+      
+      const decryptedBuffer = await serverDecrypt(photo.data, masterKey);
+      return {
+        _id: photo._id,
+        name: photo.name,
+        uploadedAt: photo.uploadedAt,
+        data: decryptedBuffer.toString('base64'),
+        contentType: photo.contentType
+      };
     }));
 
     res.status(200).json({ folder: { ...folder._doc, photos } });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Server error', error });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 

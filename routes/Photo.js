@@ -1,7 +1,6 @@
 const express = require('express');
 const { findSimilarFaces } = require('../controllers/PhotoController.js');
 const multer = require('multer');
-
 const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
