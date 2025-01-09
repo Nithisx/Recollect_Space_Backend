@@ -1,12 +1,10 @@
 // backend/controllers/PhotoController.js
 
 const path = require('path');
-const fs = require('fs');
 const faceapi = require('face-api.js');
 const canvas = require('canvas');
 const { Canvas, Image } = canvas;
 faceapi.env.monkeyPatch({ Canvas, Image });
-const crypto = require('crypto');
 
 const Folder = require('../models/FolderModel');
 const { serverDecrypt } = require('../utils/Encryption');
@@ -32,8 +30,8 @@ const loadModels = async () => {
   }
 };
 
-// Utility: Get face descriptor for a single face in the image
-const getFaceDescriptor = async (image, minConfidence = 0.7) => {
+// Utility: Get all face descriptors in the image
+const getFaceDescriptors = async (image, minConfidence = 0.7) => {
   try {
     const detections = await faceapi
       .detectAllFaces(image, new faceapi.SsdMobilenetv1Options({ minConfidence }))
@@ -41,46 +39,49 @@ const getFaceDescriptor = async (image, minConfidence = 0.7) => {
       .withFaceDescriptors();
 
     if (!detections.length) {
-      throw new Error('No face detected in the image');
+      throw new Error('No faces detected in the image');
     }
 
-    // If more than one face is detected, pick the one with the highest confidence
-    if (detections.length > 1) {
-      console.warn('Multiple faces detected; using the best match.');
-      const bestDetection = detections.reduce((prev, current) =>
-        prev.detection.score > current.detection.score ? prev : current
-      );
-      return bestDetection.descriptor;
-    }
-
-    // Return descriptor for the only detected face
-    return detections[0].descriptor;
+    // Return all descriptors
+    return detections.map(detection => detection.descriptor);
   } catch (error) {
-    throw new Error('Error detecting face: ' + error.message);
+    throw new Error('Error detecting faces: ' + error.message);
   }
 };
 
-// Utility: Compute similarity using an exponential of the Euclidean distance
-const computeSimilarity = (descriptor1, descriptor2) => {
+// Utility: Compute cosine similarity
+const computeCosineSimilarity = (descriptor1, descriptor2) => {
+  // Enhanced Logging
+  console.log('Computing Cosine Similarity between descriptors:');
+  console.log('Descriptor 1:', descriptor1);
+  console.log('Descriptor 2:', descriptor2);
+
+  // Check if descriptors are arrays
   if (!Array.isArray(descriptor1) || !Array.isArray(descriptor2)) {
     throw new Error('Invalid descriptor format. Descriptors must be arrays.');
   }
+
+  // Check if descriptors have the same length
   if (descriptor1.length !== descriptor2.length) {
     throw new Error(
       `Descriptor length mismatch: ${descriptor1.length} vs ${descriptor2.length}`
     );
   }
 
-  // Euclidean distance
-  const distance = Math.sqrt(
-    descriptor1.reduce((sum, value, i) => {
-      const diff = value - descriptor2[i];
-      return sum + diff * diff;
-    }, 0)
-  );
+  // Compute dot product
+  const dotProduct = descriptor1.reduce((sum, value, i) => sum + value * descriptor2[i], 0);
 
-  // Convert distance to a similarity score in [0, 1]
-  return Math.exp(-distance);
+  // Compute magnitudes
+  const magnitude1 = Math.sqrt(descriptor1.reduce((sum, value) => sum + value * value, 0));
+  const magnitude2 = Math.sqrt(descriptor2.reduce((sum, value) => sum + value * value, 0));
+
+  if (magnitude1 === 0 || magnitude2 === 0) {
+    console.warn('One of the descriptors has zero magnitude.');
+    return 0;
+  }
+
+  // Return cosine similarity
+  return dotProduct / (magnitude1 * magnitude2); // Value between -1 and 1
 };
 
 // Utility (debug): Prints buffer info to console
@@ -93,6 +94,48 @@ const debugBuffer = (buffer, label = '') => {
   console.log(`- Length: ${buffer.length} bytes`);
   console.log(`- First 20 bytes: ${buffer.slice(0, 20).toString('hex')}`);
   console.log(`- Is Buffer: ${Buffer.isBuffer(buffer)}`);
+};
+
+/**
+ * Helper Function: Handle Decryption of Uploaded Image
+ * This function decrypts the uploaded image using server-side and client-side decryption.
+ */
+const handleDecryption = async (file, label) => {
+  let decryptedBuffer = null;
+
+  // 1. Decrypt server-side encryption if applicable
+  if (file.isEncrypted) {
+    console.log('Image is encrypted. Attempting to decrypt server-side encryption...');
+    try {
+      decryptedBuffer = await serverDecrypt(
+        file.buffer,
+        process.env.ENCRYPTION_MASTER_KEY
+      );
+      console.log('Server-side decryption successful for:', file.originalname);
+    } catch (decryptErr) {
+      throw new Error(`Server-side decryption failed: ${decryptErr.message}`);
+    }
+  } else {
+    console.log('Image is not encrypted. Using original data.');
+    decryptedBuffer = file.buffer;
+  }
+
+  // Debug the (decrypted) buffer
+  debugBuffer(decryptedBuffer, `After Server Decryption ${label}`);
+
+  // 2. Decrypt client-side encryption
+  console.log('Attempting to decrypt client-side encryption...');
+  try {
+    decryptedBuffer = clientDecrypt(decryptedBuffer);
+    console.log('Client-side decryption successful for:', file.originalname);
+  } catch (clientDecryptErr) {
+    throw new Error(`Client-side decryption failed: ${clientDecryptErr.message}`);
+  }
+
+  // Debug the final decrypted buffer
+  debugBuffer(decryptedBuffer, `Final Decrypted ${label}`);
+
+  return decryptedBuffer;
 };
 
 /**
@@ -109,22 +152,49 @@ const findSimilarFaces = async (req, res) => {
         .status(401)
         .json({ message: 'Authorization token is required.' });
     }
-    if (!req.file || !req.body.folderId || !req.body.descriptor) {
+    if (!req.file || !req.body.folderId) {
       return res.status(400).json({
-        message: 'Missing required fields: file, folderId, or descriptor.',
+        message: 'Missing required fields: file or folderId.',
       });
     }
 
     // 2. Log Master Key (Temporary - REMOVE AFTER VERIFYING)
     console.log('Encryption Master Key:', process.env.ENCRYPTION_MASTER_KEY);
 
-    // 3. Parse incoming descriptor
+    // 3. Extract input face descriptor from the uploaded image
     let inputDescriptor;
+    let normalizedInputDescriptor; // Declare here to ensure it's accessible in the loop
     try {
-      inputDescriptor = JSON.parse(req.body.descriptor);
+      const decryptedInputBuffer = await handleDecryption(req.file, 'input');
+      debugBuffer(decryptedInputBuffer, 'Decrypted Input Image');
+
+      const img = await canvas.loadImage(decryptedInputBuffer);
+      const descriptors = await getFaceDescriptors(img);
+
+      if (descriptors.length === 0) {
+        return res.status(400).json({ message: 'No faces detected in the input image.' });
+      }
+
+      if (descriptors.length > 1) {
+        console.warn('Multiple faces detected in the input image. Using the first detected face.');
+        // Optionally, inform the user about multiple faces
+      }
+
+      inputDescriptor = descriptors[0];
+      console.log('Input face descriptor extracted successfully.');
+
+      // Normalize input descriptor and convert to regular array
+      const magnitude = Math.sqrt(inputDescriptor.reduce((sum, val) => sum + val * val, 0));
+      if (magnitude === 0) {
+        throw new Error('Input descriptor has zero magnitude.');
+      }
+      normalizedInputDescriptor = Array.from(inputDescriptor.map((value) => value / magnitude));
+      console.log('Input descriptor normalized successfully.');
+      console.log('Normalized Input Descriptor:', normalizedInputDescriptor);
     } catch (err) {
+      console.error('Error processing input image:', err.message);
       return res.status(400).json({
-        message: 'Invalid descriptor format; must be valid JSON array.',
+        message: 'Error processing input image.',
         error: err.message,
       });
     }
@@ -136,6 +206,10 @@ const findSimilarFaces = async (req, res) => {
     }
 
     console.log('Folder found. Photo count:', folder.photos.length);
+
+    if (!folder.photos || folder.photos.length === 0) {
+      return res.status(404).json({ message: 'No photos found in the folder.' });
+    }
 
     // 5. Process each photo in the folder
     const processedPhotos = await Promise.all(
@@ -218,22 +292,38 @@ const findSimilarFaces = async (req, res) => {
           return null; // Skip this photo
         }
 
-        // 5d. Load image with canvas
-        let faceDescriptor;
+        // 5d. Load image with canvas and extract face descriptors
+        let faceDescriptors;
         try {
           const img = await canvas.loadImage(decryptedBuffer);
-          faceDescriptor = await getFaceDescriptor(img);
+          faceDescriptors = await getFaceDescriptors(img);
+          console.log(`Detected ${faceDescriptors.length} face(s) in ${photo.name}`);
         } catch (err) {
           console.error(`Failed to process image ${photo.name}:`, err.message);
           return null;
         }
+
+        if (!Array.isArray(faceDescriptors) || faceDescriptors.length === 0) {
+          console.error(`No valid face descriptors extracted from ${photo.name}.`);
+          return null;
+        }
+
+        // Normalize all face descriptors and convert to regular arrays
+        const normalizedFaceDescriptors = faceDescriptors.map((descriptor, descIndex) => {
+          const magnitude = Math.sqrt(descriptor.reduce((sum, val) => sum + val * val, 0));
+          if (magnitude === 0) {
+            console.warn(`Descriptor #${descIndex + 1} in ${photo.name} has zero magnitude.`);
+            return Array.from(descriptor); // Return as is; similarity will be zero
+          }
+          return Array.from(descriptor.map((value) => value / magnitude));
+        });
 
         return {
           _id: photo._id,
           name: photo.name,
           contentType: photo.contentType,
           uploadedAt: photo.uploadedAt,
-          faceDescriptor: Array.from(faceDescriptor),
+          faceDescriptors: normalizedFaceDescriptors,
           // Return base64 so the frontend can display if needed
           data: `data:${fileType.mime};base64,${decryptedBuffer.toString(
             'base64'
@@ -256,43 +346,58 @@ const findSimilarFaces = async (req, res) => {
     }
 
     // 6. Compute similarities
-    const similarities = validPhotos.map((photo) => {
-      const similarity = computeSimilarity(inputDescriptor, photo.faceDescriptor);
-      return {
-        ...photo,
-        similarity: similarity * 100, // 0-100 scale
-        confidence: similarity, // raw 0-1
-      };
-    });
+    const matches = [];
 
-    // 7. Determine Adaptive Threshold
-    const confidences = similarities.map((p) => p.confidence);
-    const mean = confidences.reduce((a, b) => a + b, 0) / confidences.length;
-    const stdDev = Math.sqrt(
-      confidences.reduce((sum, c) => sum + (c - mean) ** 2, 0) / confidences.length
-    );
-    const adaptiveThreshold = Math.max(0.6, mean - 2 * stdDev);
+    for (const photo of validPhotos) {
+      for (const descriptor of photo.faceDescriptors) {
+        try {
+          console.log(`\nComparing input face with a face in photo: ${photo.name}`);
+          console.log('Input Descriptor Length:', normalizedInputDescriptor.length);
+          console.log('Group Descriptor Length:', descriptor.length);
 
-    console.log(`Adaptive Threshold: ${adaptiveThreshold.toFixed(4)}`);
-    console.log(`Mean Similarity: ${mean.toFixed(4)}`);
-    console.log(`Standard Deviation: ${stdDev.toFixed(4)}`);
+          // Ensure descriptors are arrays
+          if (!Array.isArray(normalizedInputDescriptor)) {
+            console.error('Input Descriptor is not an array.');
+            continue; // Skip this comparison
+          }
+          if (!Array.isArray(descriptor)) {
+            console.error(`Descriptor in photo ${photo.name} is not an array.`);
+            continue; // Skip this comparison
+          }
 
-    // 8. Filter & Sort
-    const similarPhotos = similarities
-      .filter((p) => p.confidence > adaptiveThreshold)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 9); // top 9 if needed
+          // Compute similarity
+          const similarity = computeCosineSimilarity(normalizedInputDescriptor, descriptor);
+          console.log(`Similarity Score: ${similarity.toFixed(4)}`);
 
-    console.log(`Matches Found: ${similarPhotos.length}`);
+          if (similarity > 0.5) { // Threshold set to 0.5, adjust as needed
+            matches.push({
+              _id: photo._id,
+              name: photo.name,
+              contentType: photo.contentType,
+              uploadedAt: photo.uploadedAt,
+              similarity: (similarity * 100).toFixed(2), // 0-100 scale
+              data: photo.data,
+            });
+            console.log(`Match found in photo: ${photo.name}`);
+            break; // Stop checking other faces in this photo
+          }
+        } catch (similarityError) {
+          console.error(`Error computing similarity for ${photo.name}:`, similarityError.message);
+          continue; // Skip to next descriptor
+        }
+      }
+    }
 
-    // 9. Return results
+    console.log(`Total Matches Found: ${matches.length}`);
+
+    // 7. Return results
     return res.status(200).json({
-      similarPhotos,
+      similarPhotos: matches,
       debug: {
         totalPhotos: folder.photos.length,
         processedPhotos: validPhotos.length,
-        matchesFound: similarPhotos.length,
-        threshold: adaptiveThreshold,
+        matchesFound: matches.length,
+        threshold: 0.5, // Fixed threshold
       },
     });
   } catch (error) {
