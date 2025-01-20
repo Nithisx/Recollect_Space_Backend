@@ -354,7 +354,11 @@ const findSimilarFaces = async (req, res) => {
           console.log(`\nComparing input face with a face in photo: ${photo.name}`);
           console.log('Input Descriptor Length:', normalizedInputDescriptor.length);
           console.log('Group Descriptor Length:', descriptor.length);
-
+          console.log(`\nComparing input face with a face in photo: ${photo.name}`);
+      
+          // Log the input and comparison face descriptors and the similarity score
+          console.log(`Input face descriptor: ${JSON.stringify(normalizedInputDescriptor)}`);
+          console.log(`Comparison face descriptor: ${JSON.stringify(descriptor)}`);
           // Ensure descriptors are arrays
           if (!Array.isArray(normalizedInputDescriptor)) {
             console.error('Input Descriptor is not an array.');
@@ -369,7 +373,7 @@ const findSimilarFaces = async (req, res) => {
           const similarity = computeCosineSimilarity(normalizedInputDescriptor, descriptor);
           console.log(`Similarity Score: ${similarity.toFixed(4)}`);
 
-          if (similarity > 0.5) { // Threshold set to 0.5, adjust as needed
+          if (similarity > 0.9) { // Threshold set to 0.5, adjust as needed
             matches.push({
               _id: photo._id,
               name: photo.name,
